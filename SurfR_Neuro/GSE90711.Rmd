@@ -1,0 +1,674 @@
+---
+  title: "Weiss T, Taschner-Mandl S, Bileck A, Slany A et al. 
+          Proteomics and transcriptomics of peripheral nerve tissue and cells
+          unravel new aspects of the human Schwann cell repair phenotype. 
+          Glia 2016 Dec;64(12):2133-2153. PMID: 27545331.
+          Dataset re-analysis"
+---
+  
+  ```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+
+```{r libraries }
+
+#if (!require("BiocManager", quietly = TRUE))
+#  install.packages("BiocManager")
+
+# The following initializes usage of Bioc devel
+#BiocManager::install(version='devel')
+#BiocManager::install("SurfR")
+#BiocManager::install("TCGAbiolinks")
+#devtools::install_github("auroramaurizio/SurfR")
+
+#import the libraries
+library(SurfR)
+library(stringr)
+library(openxlsx)
+library(ggplot2)
+```
+
+## Download nerve injury GSE90711 metadata from GEO 
+
+```{r GEO metadata }
+
+mGSE90711 <- GEOmetadata(GSE = "GSE90711")
+# Select rows by matching specific titles 
+#SC vs fibroblast cell lines
+#injured vs CTRL fascicles
+
+unique(mGSE90711$GSM)
+
+mGSE90711_cells <- mGSE90711[7:14, ]
+mGSE90711_fascicle <- mGSE90711[1:6, ]
+
+nrow(mGSE90711_fascicle)
+
+# create new metadata column in order to remove unwanted special characters
+# Add a new column 'CellType' based on the 'title' column
+mGSE90711_cells$CellType <- ifelse(grepl("Schwann cells", mGSE90711_cells$title), "Schwann", 
+                             ifelse(grepl("fibroblasts", mGSE90711_cells$title), "fibroblast", NA))
+
+mGSE90711_fascicle$CellType <- ifelse(grepl("injured", mGSE90711_fascicle$title), "injured", 
+                                   ifelse(grepl("CTRL", mGSE90711_fascicle$title), "CTRL", NA))
+
+
+head(mGSE90711_fascicle)
+# create new metadata column in order to remove unwanted special characters
+unwanted_character <- " "
+fx <- function(x) {
+  str_split(string = x, pattern = unwanted_character)[[1]][1]
+}
+
+mGSE90711_cells$condition <- sapply(mGSE90711_cells$CellType, fx)
+mGSE90711_cells <- as.data.frame(mGSE90711_cells)
+mGSE90711_cells$condition <- as.factor(mGSE90711_cells$condition)
+
+
+mGSE90711_fascicle$condition <- sapply(mGSE90711_fascicle$CellType, fx)
+mGSE90711_fascicle <- as.data.frame(mGSE90711_fascicle)
+mGSE90711_fascicle$condition <- as.factor(mGSE90711_fascicle$condition)
+
+```
+
+# Download count matrix from ArchS4
+
+```{r GEO countmatrix cells }
+cGSE90711_cells <- DownloadArchS4(mGSE90711_cells$GSM,
+                             species = "human",
+                             print_tsv = FALSE,
+                             filename = NULL)
+
+# Preview count matrix
+head(cGSE90711_cells[, ])
+
+```
+
+```{r GEO countmatrix fascicle}
+cGSE90711_fascicle <- DownloadArchS4(mGSE90711_fascicle$GSM,
+                                  species = "human",
+                                  print_tsv = FALSE,
+                                  filename = NULL)
+
+# Preview count matrix
+head(cGSE90711_fascicle[, ])
+
+```
+
+## Explore the GEO dataset, look for batch effects with a PCA (Fig. 1B)
+
+```{r GEO PCA cells }
+
+# Plot pca
+pdf("PCA_cGSE90711_GEO_cells.pdf")
+SurfR::plotPCA(matrix = edgeR::cpm(cGSE90711_cells), metadata = mGSE90711_cells,
+               dims = c(1, 2),
+               color.by = "condition", shape.by = "condition",
+               label = FALSE, main = "PCA cells GSE90711")
+dev.off()
+
+
+```
+
+
+```{r GEO PCA fascicles }
+
+# Plot pca
+pdf("PCA_cGSE90711_GEO_fascicle.pdf")
+SurfR::plotPCA(matrix = edgeR::cpm(cGSE90711_fascicle), metadata = mGSE90711_fascicle,
+               dims = c(1, 2),
+               color.by = "condition", shape.by = "condition",
+               label = FALSE, main = "PCA fascicles GSE90711")
+dev.off()
+
+
+```
+
+```{r GEO reorder }
+# Extract the order of GSM identifiers from mGSE90711_cells
+gsm_order_cells <- mGSE90711_cells$GSM
+
+# Reorder the columns of cGSE90711 based on the gsm_order
+cGSE90711_cells_ordered <- cGSE90711_cells[, gsm_order_cells]
+
+
+# Extract the order of GSM identifiers from mGSE90711_fascicle
+gsm_order_fascicle <- mGSE90711_fascicle$GSM
+
+# Reorder the columns of cGSE90711 based on the gsm_order
+cGSE90711_fascicle_ordered <- cGSE90711_fascicle[, gsm_order_fascicle]
+```
+
+
+# Perform DGE on the GEO cells dataset
+
+```{r GEO cells DGE }
+df_GEO_cells <- DGE(expression = cGSE90711_cells_ordered,
+              metadata = mGSE90711_cells,
+              Nreplica = 3,
+              design = "~condition",
+              condition = "condition",
+              alpha = 0.05,
+              TEST = "Schwann", CTRL ="fibroblast",
+              output_tsv = FALSE)
+
+# remove NA values
+df_GEO_cells <- df_GEO_cells[!is.na(df_GEO_cells$padj), ]
+
+# select only genes with a very Mean_CPM value < 0.5 in the control
+#df_GEO_cells <- df_GEO_cells[df_GEO_cells$Mean_CPM_C < 0.5,]
+
+# Detect SP amoung differentially expressed genes
+fdr_GeneID_cells <- df_GEO_cells[df_GEO_cells$padj < 0.05, "GeneID"]
+SP_GEO_cells <- Gene2SProtein(genes = fdr_GeneID_cells, input_type = "gene_name")
+nrow(SP_GEO_cells)
+#745 out of 5399 genes have a matching surface protein
+
+nrow(df_GEO_cells)
+
+fdrUP_GeneID_cells <- df_GEO_cells[df_GEO_cells$padj < 0.05 & df_GEO_cells$log2FoldChange > 0, "GeneID"]
+
+SPup_GEO_cells <- Gene2SProtein(genes = fdrUP_GeneID_cells, input_type = "gene_name")
+#443 out of 1832 genes have a matching surface protein # FC1
+#495 out of 2845 genes have a matching surface protein # FC 0
+
+nrow(ML_SPup_GEO_cells <- SPup_GEO_cells[grepl("machine learning", SPup_GEO_cells$Surfaceome.Label.Source),]) #334
+nrow( SPup_GEO_cells[!grepl("machine learning", SPup_GEO_cells$Surfaceome.Label.Source),]) #161
+
+
+fdrDW_GeneID_cells <- df_GEO_cells[df_GEO_cells$padj < 0.05 & df_GEO_cells$log2FoldChange < 0, "GeneID"]
+SPdw_GEO_cells <- Gene2SProtein(genes = fdrDW_GeneID_cells, input_type = "gene_name")
+#205 out of 1267 genes have a matching surface protein # FC -1
+#250 out of 2554 genes have a matching surface protein # FC 0
+
+write.xlsx(SPup_GEO_cells, "Supp_table_GSE90711_SPup_GEO_cells_FDR.xlsx")
+
+```
+
+```{r GEO fascicle DGE }
+df_GEO_fascicle <- DGE(expression = cGSE90711_fascicle_ordered,
+                       metadata = mGSE90711_fascicle,
+                       Nreplica = 3,
+                       design = "~condition",
+                       condition = "condition",
+                       alpha = 0.05,
+                       TEST = "injured", CTRL ="CTRL",
+                       output_tsv = FALSE)
+
+# remove NA values
+df_GEO_fascicle <- df_GEO_fascicle[!is.na(df_GEO_fascicle$padj), ]
+
+# select only genes with a very Mean_CPM value < 0.5 in the control
+#df_GEO_fascicle <- df_GEO_fascicle[df_GEO_fascicle$Mean_CPM_C < 0.5,]
+
+# Detect SP amoung differentially expressed genes
+fdr_GeneID_fascicle <- df_GEO_fascicle[df_GEO_fascicle$padj < 0.05, "GeneID"]
+length(fdr_GeneID_fascicle)
+
+SP_GEO_fascicle <- Gene2SProtein(genes = fdr_GeneID_fascicle, input_type = "gene_name")
+#566 out of 4293 genes have a matching surface protein
+
+fdrUP_GeneID_fascicle <- df_GEO_fascicle[df_GEO_fascicle$padj < 0.05 & df_GEO_fascicle$log2FoldChange > 0, "GeneID"]
+SPup_GEO_fascicle <- Gene2SProtein(genes = fdrUP_GeneID_fascicle, input_type = "gene_name")
+#203 out of 1373 genes have a matching surface protein FC > 1
+#251 out of 2113 genes have a matching surface protein FC > 0
+
+nrow(SPup_GEO_fascicle[grepl("machine learning", SPup_GEO_fascicle$Surfaceome.Label.Source),]) #149
+nrow(SPup_GEO_fascicle[!grepl("machine learning", SPup_GEO_fascicle$Surfaceome.Label.Source),]) #102
+
+fdrDW_GeneID_fascicle <- df_GEO_fascicle[df_GEO_fascicle$padj < 0.05 & df_GEO_fascicle$log2FoldChange < 0, "GeneID"]
+SPdw_GEO_fascicle <- Gene2SProtein(genes = fdrDW_GeneID_fascicle, input_type = "gene_name")
+# 315 out of 2180 genes have a matching surface protein FC < 0
+
+
+write.xlsx(SPup_GEO_fascicle, "Supp_table_GSE90711_SPup_GEO_fascicle_FDR0.xlsx")
+```
+
+```{r venn }
+common_rownames <- rownames(SPup_GEO_fascicle)[rownames(SPup_GEO_fascicle) %in% rownames(SPup_GEO_cells)]
+SPup_GEO_common <- SPup_GEO_fascicle[common_rownames, ]
+SPup_GEO_common$GeneID
+
+
+S_list <- list(SPup_GEO_cells = rownames(SPup_GEO_cells),
+               SPup_GEO_fascicle = rownames(SPup_GEO_fascicle))
+
+pdf("Venn_GEO_cells_fascicles.pdf")
+SVenn(S_list,
+      cols.use = c("green", "blue"),
+      opacity = 0.5,
+      output_intersectionFile = FALSE)
+dev.off()
+```
+
+
+## Perform the enrichment to carachterize UP and DOWN regulated genes
+
+```{r permorm and graphycally represent the enrichment}
+
+#library(enrichR)
+#library(ggplot2)
+
+
+dfList <- list(GEO_cells = as.data.frame(df_GEO_cells), 
+               GEO_fascicle = as.data.frame(df_GEO_fascicle))
+
+# perform the enrichment
+Enrich <- Enrichment(dfList,
+                     enrich.databases = c("GO_Biological_Process_2021"),
+                     p_adj = 0.05, logFC = 1, save.results = TRUE)
+
+
+# represent the enriched pathways as a barplot
+
+pdf("Enrichment_barplot_GEO_cells_UP_allgenes.pdf", 7, 4)
+Enrichment_barplot(Enrich$GEO_cells,
+                   enrich.databases <- c("GO_Biological_Process_2021"),
+                   p_adj = 0.05,
+                   num_term = 10,
+                   cond = "UP")
+dev.off()
+
+pdf("Enrichment_barplot_GEO_cells_DW_allgenes.pdf", 10, 4)
+Enrichment_barplot(Enrich$GEO_cells,
+                   enrich.databases <- c("GO_Biological_Process_2021"),
+                   p_adj = 0.05,
+                   num_term = 10,
+                   cond = "DOWN")
+dev.off()
+
+pdf("Enrichment_barplot_GEO_fascicle_UP_allgenes.pdf", 7, 4)
+Enrichment_barplot(Enrich$GEO_fascicle,
+                   enrich.databases <- c("GO_Biological_Process_2021"),
+                   p_adj = 0.05,
+                   num_term = 10,
+                   cond = "UP")
+dev.off()
+
+pdf("Enrichment_barplot_GEO_fascicle_DW_allgenes.pdf", 10, 4)
+Enrichment_barplot(Enrich$GEO_fascicle,
+                   enrich.databases <- c("GO_Biological_Process_2021"),
+                   p_adj = 0.05,
+                   num_term = 10,
+                   cond = "DOWN")
+dev.off()
+
+
+```
+## perform and graphically represent the enrichment of SPCG vs non SPCG 
+
+```{r enrichment of SPCG vs non SPCG}
+
+
+SP_GEO_cells_genes <- SP_GEO_cells$UniProt.gene
+NSP_GEO_cells_genes <- df_GEO_cells$GeneID[!df_GEO_cells$GeneID %in% SP_GEO_cells_genes] 
+
+df_SP_GEO_cells_genes <- df_GEO_cells[rownames(df_GEO_cells) %in% SP_GEO_cells_genes, ]
+df_NSP_GEO_cells_genes <- df_GEO_cells[rownames(df_GEO_cells) %in% NSP_GEO_cells_genes, ]
+
+dfListSP_GEO_cells <- list(SP_GEO_cells = as.data.frame(df_SP_GEO_cells_genes)) 
+
+dfListNSP_GEO_cells <- list(NSP_GEO_cells = as.data.frame(df_NSP_GEO_cells_genes))
+
+Enrich_GEO_BP <- Enrichment(dfListSP_GEO_cells,
+                            enrich.databases = c("GO_Biological_Process_2021"),
+                            p_adj = 0.05, logFC = 1, save.results = TRUE)
+
+
+# biological process
+
+SPvs_nSP_UP_GEO_BP <- Enrichment_barplot(Enrich_GEO_BP$SP_GEO_cells,
+                                         enrich.databases <- c("GO_Biological_Process_2021"),
+                                         p_adj = 0.05,
+                                         num_term = 10)
+
+
+pdf("Enrich_SPvs_nSP_UP_GEO_cells_BP_new.pdf",5.5,2)
+print(SPvs_nSP_UP_GEO_BP +ggtitle("SP - GEO BP")+ 
+        theme(
+          legend.title = element_text(size = 6), # Adjust legend title font size
+          legend.text = element_text(size = 6)   # Adjust legend text font size
+        ) )
+dev.off()
+
+
+## nSP #########################################################################
+
+Enrich_GEO_BP_nsp <- Enrichment(dfListNSP_GEO_cells,
+                                enrich.databases = c("GO_Biological_Process_2021"),
+                                p_adj = 0.05, logFC = 1, save.results = TRUE)
+
+
+SPvs_nSP_DOWN_GEO_BP <- Enrichment_barplot(Enrich_GEO_BP_nsp$NSP_GEO_cells,
+                                           enrich.databases <- c("GO_Biological_Process_2021"),
+                                           p_adj = 0.05,
+                                           num_term = 10)
+
+
+
+pdf("Enrich_nSP_DOWN_GEO_cells_BP.pdf",5.5,2)
+print(SPvs_nSP_DOWN_GEO_BP +ggtitle("nSP - GEO BP")+ 
+        theme(
+          legend.title = element_text(size = 6), # Adjust legend title font size
+          legend.text = element_text(size = 6)   # Adjust legend text font size
+        ) )
+dev.off()
+
+```
+
+
+```{r GEO CC, MF }
+
+Enrich_GEO_CC_nsp <- Enrichment(dfListNSP_GEO_cells,
+                                enrich.databases = c("GO_Cellular_Component_2021"),
+                                p_adj = 0.05, logFC = 1, save.results = TRUE)
+
+Enrich_GEO_MF_nsp <- Enrichment(dfListNSP_GEO_cells,
+                                enrich.databases = c("GO_Molecular_Function_2021"),
+                                p_adj = 0.05, logFC = 1, save.results = TRUE)
+
+
+SPvs_nSP_DOWN_GEO_CC <- Enrichment_barplot(Enrich_GEO_CC_nsp$NSP_GEO_cells,
+                                           enrich.databases <- c("GO_Cellular_Component_2021"),
+                                           p_adj = 0.05,
+                                           num_term = 10)
+print(SPvs_nSP_DOWN_GEO_CC +ggtitle("nSP - GEO CC")) 
+
+
+SPvs_nSP_DOWN_GEO_MF <- Enrichment_barplot(Enrich_GEO_MF_nsp$NSP_GEO_cells,
+                                           enrich.databases <- c("GO_Molecular_Function_2021"),
+                                           p_adj = 0.05,
+                                           num_term = 10)
+print(SPvs_nSP_DOWN_GEO_MF +ggtitle("nSP - GEO MF")) 
+
+```
+
+
+## annotate our list of genes with cross-database identifiers
+
+
+```{r GEO cells annotate SPID }
+annotated_GEO <- Annotate_SPID(df_GEO_cells, "WikiPathway_2021_Human")
+head(annotated_GEO, 10)
+
+write.xlsx(annotated_GEO, "annotated_GEO_cells_WikiPathway_2021_Human.xlsx")
+```
+
+```{r GEO fascicle annotate SPID }
+annotated_GEO <- Annotate_SPID(df_GEO_fascicle, "WikiPathway_2021_Human")
+head(annotated_GEO, 10)
+
+write.xlsx(annotated_GEO, "annotated_GEO_cells_WikiPathway_2021_Human.xlsx")
+```
+
+
+## Plot the fraction on SPCG coding for receptor, enzymes, transporters etc.
+
+```{r Almen classification }
+# Barplot of Almen classification
+
+
+pdf("Almen_class_SPUP_GEO_cells.pdf")
+Splot(SPup_GEO_cells,
+      group.by = "Membranome.Almen.main-class",
+      main = "Almen class Adj")
+dev.off()
+
+
+pdf("Almen_class_SPUP_GEO_fascicle.pdf")
+Splot(SPup_GEO_fascicle,
+      group.by = "Membranome.Almen.main-class",
+      main = "Almen class Adj")
+dev.off()
+
+SPup <- SPup_GEO_cells[rownames(SPup_GEO_cells) %in% rownames(SPup_GEO_fascicle), ]
+nrow(SPup)
+
+pdf("Almen_class_SPUP_GEO_common.pdf")
+Splot(SPup,
+      group.by = "Membranome.Almen.main-class",
+      main = "Almen class Adj")
+dev.off()
+```
+
+```{r Almen classification }
+####### enrichment of common SPCG ############
+nrow(SPup)
+all_SPup <- SPup$UniProt.gene
+df_SP_GEO_cells_genes_all_comm <- df_GEO_cells[rownames(df_GEO_cells) %in% all_SPup, ]
+ML_SPup <- SPup[grepl("machine learning", SPup$Surfaceome.Label.Source),]
+ML_SPup <- ML_SPup$UniProt.gene
+df_SP_GEO_cells_genes_ML <- df_GEO_cells[rownames(df_GEO_cells) %in% ML_SPup, ]
+nrow(df_SP_GEO_cells_genes_ML)
+nrow(df_SP_GEO_cells_genes_all_comm)
+
+df_SP_GEO_cells_genes_ML_all <- list(SP_GEO_cells_ML = as.data.frame(df_SP_GEO_cells_genes_ML))
+
+
+
+Enrich_GEO_BP_ML <- Enrichment(df_SP_GEO_cells_genes_ML_all,
+                               enrich.databases = c("GO_Cellular_Component_2021"),
+                               p_adj = 0.05, logFC = 1, save.results = TRUE)
+
+
+Enrich_GEO_BP_ML$SP_GEO_cells_ML$fdr_up$GO_Cellular_Component_2021
+
+
+
+Enrich_GEO_BP_ML_P <- Enrichment_barplot(Enrich_GEO_BP_ML$SP_GEO_cells_ML,
+                                         enrich.databases = c("GO_Cellular_Component_2021"),
+                                         p_adj = 0.05,
+                                         num_term = 5, cond = "UP")
+
+
+print(Enrich_GEO_BP_ML_P +ggtitle("SP - ML")+ 
+        theme(
+          legend.title = element_text(size = 6), 
+          legend.text = element_text(size = 6)   
+        ) )
+
+
+
+pdf("ML_predicted_SP_common_CC_.pdf")
+print(Enrich_GEO_CC_ML_P +ggtitle("common ML-pred SP CC")+ 
+        theme(
+          legend.title = element_text(size = 6), 
+          legend.text = element_text(size = 6)   
+        ) )
+dev.off()
+
+
+pdf("ML_predicted_SP_common_CC_.pdf", 7, 4)
+Enrich_GEO_CC_ML_P
+dev.off()
+
+df_SP_GEO_cells_genes_all_comm$GeneID
+
+
+df_SP_GEO_cells_genes_all <- list(SP_GEO_cells_all = as.data.frame(df_SP_GEO_cells_genes_all_comm))
+
+
+Enrich_GEO_CC_all <- Enrichment(df_SP_GEO_cells_genes_all,
+                                enrich.databases = c("GO_Cellular_Component_2021"),
+                                p_adj = 0.05, logFC = 1, save.results = TRUE)
+
+
+Enrich_GEO_CC_all_P <- Enrichment_barplot(Enrich_GEO_CC_all$SP_GEO_cells_all,
+                                          enrich.databases = c("GO_Cellular_Component_2021"),
+                                          p_adj = 0.05,
+                                          num_term = 10, cond = "UP")
+
+
+print(Enrich_GEO_CC_all_P +ggtitle("SP - common")+ 
+        theme(
+          legend.title = element_text(size = 6), 
+          legend.text = element_text(size = 6)   
+        ) )
+
+
+
+pdf("SP_common_CC_.pdf", 5, 6)
+print(Enrich_GEO_CC_all_P +ggtitle("common SP CC")+ 
+        theme(
+          legend.title = element_text(size = 6), 
+          legend.text = element_text(size = 6)   
+        ) )
+dev.off()
+
+
+
+
+
+Enrich_GEO_BP_all <- Enrichment(df_SP_GEO_cells_genes_all,
+                                enrich.databases = c("GO_Biological_Process_2021"),
+                                p_adj = 0.05, logFC = 1, save.results = TRUE)
+
+
+Enrich_GEO_BP_all_P <- Enrichment_barplot(Enrich_GEO_BP_all$SP_GEO_cells_all,
+                                          enrich.databases = c("GO_Biological_Process_2021"),
+                                          p_adj = 0.05,
+                                          num_term = 10, cond = "UP")
+
+
+
+pdf("SP_common_CC_.pdf", 7,4)
+Enrich_GEO_CC_all_P 
+dev.off()
+
+pdf("SP_common_BP_.pdf")
+print(Enrich_GEO_BP_all_P +ggtitle("common SP BP")+ 
+        theme(
+          legend.title = element_text(size = 6), 
+          legend.text = element_text(size = 6)   
+        ) )
+dev.off()
+
+```
+
+
+################################################################################
+# Redo imposing a low SPCG expression in the control (Mean_CPM_C < 0.5)
+
+################################################################################
+
+
+
+# Perform DGE on the GEO dataset
+
+```{r GEO cells }
+df_GEO_cells <- DGE(expression = cGSE90711_cells_ordered,
+                    metadata = mGSE90711_cells,
+                    Nreplica = 3,
+                    design = "~condition",
+                    condition = "condition",
+                    alpha = 0.05,
+                    TEST = "Schwann", CTRL ="fibroblast",
+                    output_tsv = FALSE)
+
+# remove NA values
+df_GEO_cells <- df_GEO_cells[!is.na(df_GEO_cells$padj), ]
+
+# select only genes with a very Mean_CPM value < 0.5 in the control
+df_GEO_cells <- df_GEO_cells[df_GEO_cells$Mean_CPM_C < 0.5,]
+
+# Detect SP amoung differentially expressed genes
+fdr_GeneID_cells <- df_GEO_cells[df_GEO_cells$padj < 0.05, "GeneID"]
+
+SP_GEO_cells <- Gene2SProtein(genes = fdr_GeneID_cells, input_type = "gene_name")
+#77 out of 350 genes have a matching surface protein
+
+fdrUP_GeneID_cells <- df_GEO_cells[df_GEO_cells$padj < 0.05 & df_GEO_cells$log2FoldChange > 0, "GeneID"]
+SPup_GEO_cells <- Gene2SProtein(genes = fdrUP_GeneID_cells, input_type = "gene_name")
+#77 out of 350 genes have a matching surface protein
+
+fdrDW_GeneID_cells <- df_GEO_cells[df_GEO_cells$padj < 0.05 & df_GEO_cells$log2FoldChange < 0, "GeneID"]
+SPdw_GEO_cells <- Gene2SProtein(genes = fdrDW_GeneID_cells, input_type = "gene_name")
+#The input genes do not have any match in the surfaceome database.
+
+
+#write.xlsx(SPup_GEO_cells, "Supp_table_GSE90711_SPup_GEO_filt.xlsx")
+```
+
+```{r GEO fascicle }
+df_GEO_fascicle <- DGE(expression = cGSE90711_fascicle_ordered,
+                       metadata = mGSE90711_fascicle,
+                       Nreplica = 3,
+                       design = "~condition",
+                       condition = "condition",
+                       alpha = 0.05,
+                       TEST = "injured", CTRL ="CTRL",
+                       output_tsv = FALSE)
+
+# remove NA values
+df_GEO_fascicle <- df_GEO_fascicle[!is.na(df_GEO_fascicle$padj), ]
+
+# select only genes with a very Mean_CPM value < 0.5 in the control
+df_GEO_fascicle <- df_GEO_fascicle[df_GEO_fascicle$Mean_CPM_C < 0.5,]
+
+# Detect SP amoung differentially expressed genes
+fdr_GeneID_fascicle <- df_GEO_fascicle[df_GEO_fascicle$padj < 0.05, "GeneID"]
+
+SP_GEO_fascicle <- Gene2SProtein(genes = fdr_GeneID_fascicle, input_type = "gene_name")
+#20 out of 90 genes have a matching surface protein
+
+fdrUP_GeneID_fascicle <- df_GEO_fascicle[df_GEO_fascicle$padj < 0.05 & df_GEO_fascicle$log2FoldChange > 0, "GeneID"]
+SPup_GEO_fascicle <- Gene2SProtein(genes = fdrUP_GeneID_fascicle, input_type = "gene_name")
+#20 out of 90 genes have a matching surface protein
+
+fdrDW_GeneID_fascicle <- df_GEO_fascicle[df_GEO_fascicle$padj < 0.05 & df_GEO_fascicle$log2FoldChange < 0, "GeneID"]
+SPdw_GEO_fascicle <- Gene2SProtein(genes = fdrDW_GeneID_fascicle, input_type = "gene_name")
+#The input genes do not have any match in the surfaceome database.
+```
+
+
+```{r venn }
+S_list <- list(SPup_GEO_cells = rownames(SPup_GEO_cells),
+               SPup_GEO_fascicle = rownames(SPup_GEO_fascicle))
+
+pdf("Venn_GEO_cells_fascicles_filtered.pdf")
+SVenn(S_list,
+      cols.use = c("green", "blue"),
+      opacity = 0.5,
+      output_intersectionFile = FALSE)
+dev.off()
+
+```
+
+```{r common }
+common_rownames <- rownames(SPup_GEO_fascicle)[rownames(SPup_GEO_fascicle) %in% rownames(SPup_GEO_cells)]
+SPup_GEO_common <- SPup_GEO_fascicle[common_rownames, ]
+SPup_GEO_common$GeneID
+#"HLAG_HUMAN"  "5HT1E_HUMAN" "MCHR1_HUMAN"
+
+# HLAG_HUMAN: https://www.sciencedirect.com/science/article/pii/S0969996122003448
+# https://opencell.czbiohub.org/gene/ENSG00000204632
+
+# 5HT1E_HUMAN: https://pubmed.ncbi.nlm.nih.gov/9125415/
+# https://opencell.czbiohub.org/gene/ENSG00000168830
+
+# MCHR1_HUMAN: https://www.sciencedirect.com/science/article/abs/pii/0196978195000088
+# https://opencell.czbiohub.org/gene/ENSG00000128285
+
+#pdf("Almen_class_SPUP_metacomb.pdf")
+Splot(SPup_GEO_fascicle,
+      group.by = "Membranome.Almen.main-class",
+      main = "Almen class Adj")
+
+Splot(SPup_GEO_cells,
+      group.by = "Membranome.Almen.main-class",
+      main = "Almen class Adj")
+
+pdf("Almen_class_SPUP_GEO_common_filt.pdf")
+Splot(SPup_GEO_common,
+      group.by = "Membranome.Almen.main-class",
+      main = "Almen class Adj")
+dev.off()
+```
+
+
+
+
