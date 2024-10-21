@@ -2,15 +2,14 @@
 
 # _SurfR applications_
 
-## -  Cancer: cholangiocarcinoma
+ * ## Cancer: cholangiocarcinoma
 
-### [SurfR](https://www.bioconductor.org/packages/release/bioc/html/SurfR.html) Bioconductor package [use-case](/Users/maurizio.aurora/Documents/GitHub/MyOwnGithub/SurfR_UseCases/SurfR_Cancer) R code.
+   * ### [SurfR](https://www.bioconductor.org/packages/release/bioc/html/SurfR.html) Bioconductor package [use-case](./SurfR_Cancer) R code.
 
 
+ * ## Neuroscience: Peripheral Nerve Injury (PNI)
 
-## -  Neuroscience: Peripheral Nerve Injury (PNI)
-
-### [SurfR](https://www.bioconductor.org/packages/release/bioc/html/SurfR.html) Bioconductor package "beyond cancer" [use-case](/Users/maurizio.aurora/Documents/GitHub/MyOwnGithub/SurfR_UseCases/SurfR_Neuro) R code.
+   * ### [SurfR](https://www.bioconductor.org/packages/release/bioc/html/SurfR.html) Bioconductor package "beyond cancer" [use-case](./SurfR_Neuro) R code.
 
  
 
