@@ -2,7 +2,7 @@
 
 # _SurfR applications_
 
-# Neurobiology: Peripheral Nerve Injury (PNI)
+# Neuroscience: Peripheral Nerve Injury (PNI)
 
 ## [SurfR](https://www.bioconductor.org/packages/release/bioc/html/SurfR.html) Bioconductor package "beyond cancer" use-case R code.
 
