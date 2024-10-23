@@ -435,37 +435,33 @@ Splot(SPup,
 dev.off()
 ```
 
-```{r Almen classification }
+```{r Enrichment }
+
 ####### enrichment of common SPCG ############
-nrow(SPup)
+
 all_SPup <- SPup$UniProt.gene
 df_SP_GEO_cells_genes_all_comm <- df_GEO_cells[rownames(df_GEO_cells) %in% all_SPup, ]
 ML_SPup <- SPup[grepl("machine learning", SPup$Surfaceome.Label.Source),]
 ML_SPup <- ML_SPup$UniProt.gene
 df_SP_GEO_cells_genes_ML <- df_GEO_cells[rownames(df_GEO_cells) %in% ML_SPup, ]
-nrow(df_SP_GEO_cells_genes_ML)
-nrow(df_SP_GEO_cells_genes_all_comm)
 
 df_SP_GEO_cells_genes_ML_all <- list(SP_GEO_cells_ML = as.data.frame(df_SP_GEO_cells_genes_ML))
 
 
 
-Enrich_GEO_BP_ML <- Enrichment(df_SP_GEO_cells_genes_ML_all,
+Enrich_GEO_CC_ML <- Enrichment(df_SP_GEO_cells_genes_ML_all,
                                enrich.databases = c("GO_Cellular_Component_2021"),
                                p_adj = 0.05, logFC = 1, save.results = TRUE)
 
 
-Enrich_GEO_BP_ML$SP_GEO_cells_ML$fdr_up$GO_Cellular_Component_2021
 
-
-
-Enrich_GEO_BP_ML_P <- Enrichment_barplot(Enrich_GEO_BP_ML$SP_GEO_cells_ML,
+Enrich_GEO_CC_ML_P <- Enrichment_barplot(Enrich_GEO_CC_ML$SP_GEO_cells_ML,
                                          enrich.databases = c("GO_Cellular_Component_2021"),
                                          p_adj = 0.05,
                                          num_term = 5, cond = "UP")
 
 
-print(Enrich_GEO_BP_ML_P +ggtitle("SP - ML")+ 
+print(Enrich_GEO_CC_ML_P +ggtitle("SP - ML")+ 
         theme(
           legend.title = element_text(size = 6), 
           legend.text = element_text(size = 6)   
